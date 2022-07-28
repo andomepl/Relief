@@ -9,6 +9,7 @@ Shader "Unlit/relief"
         [NORMAL]
         _NormalTex("Normal Tex",2D)="white"{}
         _MaxStep("Max Step",Range(10,50))=10
+        _test("test",Range(1,10))=2
 
 
     }
@@ -62,6 +63,8 @@ Shader "Unlit/relief"
 
             float _MaxStep;
 
+            float _test;
+
             float _MaxHeightField;
 
             v2f vert (appdata v)
@@ -109,11 +112,29 @@ Shader "Unlit/relief"
             }
 
 
+            float2 Hammersley(float i, float numSamples)
+            {   
+                uint b = uint(i);
+    
+                b = (b << 16u) | (b >> 16u);
+                b = ((b & 0x55555555u) << 1u) | ((b & 0xAAAAAAAAu) >> 1u);
+                b = ((b & 0x33333333u) << 2u) | ((b & 0xCCCCCCCCu) >> 2u);
+                b = ((b & 0x0F0F0F0Fu) << 4u) | ((b & 0xF0F0F0F0u) >> 4u);
+                b = ((b & 0x00FF00FFu) << 8u) | ((b & 0xFF00FF00u) >> 8u);
+    
+                float radicalInverseVDC = float(b) * 2.3283064365386963e-10;
+    
+                return float2((i / numSamples), radicalInverseVDC);
+            } 
+
+
+
+
             float near_acc_binary(float Step_size,float2 startuv,float2 MaxUVOffset,float CurDepth,out float alpha){
                    
                 float FinDepth=0;
 
-                float Max_Binary_Step=10;
+                float Max_Binary_Step=5;
                 float Binary_Step_Size=Step_size*0.5f;
 
                 for(int i=0;i<Max_Binary_Step-1;i++){
@@ -148,7 +169,7 @@ Shader "Unlit/relief"
             float Pass_iterDepth(float2 MaxUVOffset,float2 startuv,inout float alpha){
                 
                 float Max_step=_MaxStep;
-                float Step_size=1.0F/Max_step;
+                float Step_size=1.0f/Max_step;
 
                 float AccDepth=1.0f;
 
@@ -158,10 +179,14 @@ Shader "Unlit/relief"
                 
                 for(int i=0;i<Max_step-1;i++){
                     
+                   
                     CurDepth+=Step_size;
 
-                    float2 currentUV=startuv+MaxUVOffset*CurDepth;
-                    float RealDepth0=tex2D(_ReliefTex,currentUV).r+0.2f;   
+                    float h=0;
+                    h=(i+lerp(0,Hammersley(i,Max_step).x,_test))/Max_step;
+
+                    float2 currentUV=startuv+MaxUVOffset*h;
+                    float RealDepth0=(tex2D(_ReliefTex,currentUV).r)+0.4f;   
                     if(AccDepth>0.996f)
                     if(CurDepth>RealDepth0){
                             AccDepth=CurDepth;    
@@ -183,7 +208,7 @@ Shader "Unlit/relief"
             
             }
 
-
+ 
           
 
             float4 frag (v2f i) : SV_Target
