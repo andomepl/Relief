@@ -8,8 +8,11 @@ Shader "Unlit/relief"
         _ReliefTexBack("Relief Texture Back",2D)="white" {}
         [NORMAL]
         _NormalTex("Normal Tex",2D)="white"{}
-        _MaxStep("Max Step",Range(10,50))=10
-        _test("test",Range(1,10))=2
+        _MaxStep("Max Step",Range(10,500))=10
+        _DiterStep("Dither Step",Range(0,100))=0.5
+
+        _FrontScale("Fron Scale ",Range(0,2))=1
+        _BackScale("Back Scale",Range(0,2))=1
 
 
     }
@@ -63,9 +66,13 @@ Shader "Unlit/relief"
 
             float _MaxStep;
 
-            float _test;
+            float _DiterStep;
 
             float _MaxHeightField;
+
+            float _FrontScale;
+            float _BackScale;
+
 
             v2f vert (appdata v)
             {
@@ -80,7 +87,7 @@ Shader "Unlit/relief"
 
                 float4 OSCamera=mul(unity_WorldToObject,float4(_WorldSpaceCameraPos,1.0));
 
-                float3 OSViewDir=OSCamera.xyz-v.vertex.xyz ;
+                float3 OSViewDir=normalize(OSCamera.xyz-v.vertex.xyz);
 
                 o.TSviewDir =float3(
                     dot(OSViewDir, v.tangent.xyz),
@@ -130,84 +137,40 @@ Shader "Unlit/relief"
 
 
 
-            float near_acc_binary(float Step_size,float2 startuv,float2 MaxUVOffset,float CurDepth,out float alpha){
-                   
-                float FinDepth=0;
+            float3 unrealVer(out float alpha,float2 startuv,float3 ViewDirTs){
+            
+                float3 uvout=float3(0,0,0);
 
-                float Max_Binary_Step=5;
-                float Binary_Step_Size=Step_size*0.5f;
+                float i=0;
 
-                for(int i=0;i<Max_Binary_Step-1;i++){
+                float height=0;
 
-                       float2 currentUV=startuv+MaxUVOffset*CurDepth;
-                       float RealDepth1=tex2D(_ReliefTex,currentUV).r;
-                        float RealDepth1_Back=tex2D(_ReliefTexBack,currentUV).r;
-                        if(RealDepth1<CurDepth&&CurDepth<RealDepth1_Back ){
-                          if(currentUV.x<1&&currentUV.x>0&&currentUV.y<1&&currentUV.y>0){
-                            FinDepth=CurDepth;
-                            CurDepth-=2*Binary_Step_Size;
-                             alpha=1;
- 
-                                }
-                                else{
-                                FinDepth=1;
-                                alpha=0;
-                                }
-                            
+                while(i<_MaxStep){
+                    float h=(i+lerp(0,Hammersley(i,_MaxStep).x-0.5f,_DiterStep))/_MaxStep;
+
+
+                    float2 uvCurrent=startuv+ViewDirTs.xy*(h-_MaxHeightField)/(dot(ViewDirTs,float3(0,0,1.0f)));
+
+  
+
+                        float RealDepth1=tex2Dlod(_ReliefTex,float4(uvCurrent,0,0)).r*_FrontScale;
+                        float RealDepth1_Back=tex2Dlod(_ReliefTexBack,float4(uvCurrent,0,0)).r*_BackScale;
+
+                        if(RealDepth1>h&&h>(1-RealDepth1_Back)){
+                            if(uvCurrent.x>0&&uvCurrent.x<1&&uvCurrent.y>0&&uvCurrent.y<1){
+                                    uvout=float3(uvCurrent,h);
+                                    alpha=1;
+
+                            }
                         }
-                        CurDepth+=Binary_Step_Size;
 
-                    
-                    Binary_Step_Size*=0.5f;
-                
+                        i++;
                 }
-                    
-                return FinDepth;
+                
+                
+                return uvout;
             
             }
-
-            float Pass_iterDepth(float2 MaxUVOffset,float2 startuv,inout float alpha){
-                
-                float Max_step=_MaxStep;
-                float Step_size=1.0f/Max_step;
-
-                float AccDepth=1.0f;
-
-                float CurDepth=0.0f;
-
-              
-                
-                for(int i=0;i<Max_step-1;i++){
-                    
-                   
-                    CurDepth+=Step_size;
-
-                    float h=0;
-                    h=(i+lerp(0,Hammersley(i,Max_step).x,_test))/Max_step;
-
-                    float2 currentUV=startuv+MaxUVOffset*h;
-                    float RealDepth0=(tex2D(_ReliefTex,currentUV).r)+0.4f;   
-                    if(AccDepth>0.996f)
-                    if(CurDepth>RealDepth0){
-                            AccDepth=CurDepth;    
-                            alpha=1;
-
- 
-                    }
-                                          
-                }
-
-
-                float outalpha=0;
-
-                float Depth=near_acc_binary(Step_size,startuv,MaxUVOffset,AccDepth,outalpha);
-
-                   alpha=outalpha;
-                return Depth;
-                
-            
-            }
-
  
           
 
@@ -215,76 +178,29 @@ Shader "Unlit/relief"
             {
 
 
-                float3 ViewDirTS=i.TSviewDir;
-
-                float3 LightDirTS=i.TSLightDir;
+                float3 ViewDirTS=normalize(i.TSviewDir);
 
 
-                
-                float3 PosTs=i.TangentPos;
+
+             
 
                 float2 Curuv=i.uv;
                 
 
-                float2 maxUVOffset=ViewDirTS.xy*_MaxHeightField/(-ViewDirTS.z);
+
 
                 float alpha=0;
 
-                float Fdepth=saturate(Pass_iterDepth(maxUVOffset,Curuv,alpha));
-                
-               
-             //  return  float4(Fdepth.xxx,1);
-
-                float2 Fuv=Curuv+maxUVOffset*Fdepth;
-
-    
-
-     
-
-                
-                //alpha*=satUV;
-                
-
-               // return float4(alpha.xxx,1);
-               float3 diffuseColor =0;
-                if(alpha==1.0f)
-                 diffuseColor = tex2D(_MainTex, Fuv).rgb;
-               
+      
+               float3 unrealUV=unrealVer(alpha,Curuv,normalize(ViewDirTS));
 
 
-                return float4(diffuseColor*alpha,alpha);
-         
+               float3  unrealColor = tex2Dlod(_MainTex, float4(unrealUV.xy,0,0)).rgb;
 
-                float3 normalTS=UnpackNormal(tex2D(_NormalTex,Fuv));
+           //    return float4(unrealUV.zzz,1);
 
+               return float4(unrealColor,alpha);
 
-                       
-                float3 hit_Point=PosTs+(ViewDirTS/-ViewDirTS.z)*Fdepth*_MaxHeightField;
-
-          
-
-                float3 From_hit_point_to_light=LightDirTS+(PosTs-hit_Point);
-
-   
-
-                float3 TsLight=normalize(From_hit_point_to_light);
-                float3 TsNormal=normalize(normalTS);
-                float3 H=normalize(From_hit_point_to_light+ViewDirTS);
-          
-
-                float ndotl=max(dot(TsNormal,TsLight),0.0);
-                float specualCof=pow(saturate(dot(TsNormal,H)),128);
-
-            
-
-                float3 specularColor=float3(1,1,1);
-                
-       
-
-                float3 col=diffuseColor.rgb*ndotl;//+specualCof*specularColor;
-
-              
-                return float4(col,alpha);
             }
             ENDCG
         }
